@@ -18,9 +18,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
 
-set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
-
-add_library(${PROJECT_NAME} STATIC
+add_library(${PROJECT_NAME}
   src/diagnostic_updater.cpp
 )
 target_include_directories(
@@ -29,7 +27,6 @@ target_include_directories(
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-
 ament_target_dependencies(
   ${PROJECT_NAME}
   PUBLIC
@@ -42,7 +39,7 @@ install(
   EXPORT ${PROJECT_NAME}Targets
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
-  RUNTIME DESTINATION lib/${PROJECT_NAME}
+  RUNTIME DESTINATION bin
   INCLUDES DESTINATION include
 )
 
@@ -109,10 +106,10 @@ install(
   DESTINATION lib/${PROJECT_NAME}
 )
 
-# install(
-#   TARGETS example
-#   DESTINATION lib/${PROJECT_NAME}
-# )
+install(
+  TARGETS example
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 install(
   DIRECTORY include/
