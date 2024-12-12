@@ -52,7 +52,7 @@ jobs:
           changelog: false
           skip_build: false
           skip_tag: true
-          release_branches: "ros2-iron"
+          release_branches: greenroom
 
   release:
     name: Create Release
@@ -74,4 +74,4 @@ jobs:
           changelog: false
           skip_build: true
           skip_tag: false
-          release_branches: ros2
+          release_branches: greenroom
