@@ -372,3 +372,4 @@ Changelog for package diagnostic_aggregator
 * Updated documentation, fixed copy-paste error
 * diagnostic_aggregator package to filter and analyze robot diagnostics
 * Contributors: Vincent Rabaud, blaise, dthomas, eitanme, gerkey, kwc, vrabaud, watts, wattsk, wheeler, wim
+
