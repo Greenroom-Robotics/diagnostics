@@ -44,19 +44,24 @@ Updater::Updater(
   std::shared_ptr<rclcpp::node_interfaces::NodeLoggingInterface> logging_interface,
   std::shared_ptr<rclcpp::node_interfaces::NodeParametersInterface> parameters_interface,
   std::shared_ptr<rclcpp::node_interfaces::NodeTimersInterface> timers_interface,
-  std::shared_ptr<rclcpp::node_interfaces::NodeTopicsInterface> topics_interface, double period)
+  std::shared_ptr<rclcpp::node_interfaces::NodeTopicsInterface> topics_interface,
+  double period,
+  const std::string & topic_name,
+  const std::string & node_name_override,
+  const std::string & param_name_prefix)
 : verbose_(false),
   base_interface_(base_interface),
   timers_interface_(timers_interface),
   clock_(clock_interface->get_clock()),
   period_(rclcpp::Duration::from_seconds(period)),
   publisher_(rclcpp::create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
-      topics_interface, "/diagnostics", 1)),
+      topics_interface, topic_name, 1)),
   logger_(logging_interface->get_logger()),
   node_name_(base_interface->get_name()),
+  topic_name_(topic_name),
   warn_nohwid_done_(false)
 {
-  constexpr const char * period_param_name = "diagnostic_updater.period";
+  std::string period_param_name = param_name_prefix + ".period";
   rclcpp::ParameterValue period_param;
   if (parameters_interface->has_parameter(period_param_name)) {
     period_param = parameters_interface->get_parameter(period_param_name).get_parameter_value();
@@ -69,7 +74,7 @@ Updater::Updater(
 
   reset_timer();
 
-  constexpr const char * use_fqn_param_name = "diagnostic_updater.use_fqn";
+  std::string use_fqn_param_name = param_name_prefix + ".use_fqn";
   rclcpp::ParameterValue use_fqn_param;
   if (parameters_interface->has_parameter(use_fqn_param_name)) {
     use_fqn_param = parameters_interface->get_parameter(use_fqn_param_name).get_parameter_value();
@@ -79,6 +84,11 @@ Updater::Updater(
   }
   node_name_ = use_fqn_param.get<bool>() ? base_interface->get_fully_qualified_name() :
     base_interface->get_name();
+
+  // If a node_name_override is provided, use it instead of the actual node name
+  if (!node_name_override.empty()) {
+    node_name_ = node_name_override;
+  }
 }
 
 void Updater::broadcast(unsigned char lvl, const std::string msg)
@@ -93,6 +103,10 @@ void Updater::broadcast(unsigned char lvl, const std::string msg)
 
     status.name = iter->getName();
     status.summary(lvl, msg);
+
+    // Apply prefix (per-task override or global node name)
+    std::string prefix = getEffectivePrefix(iter->getPrefixOverride());
+    status.name = prefix + std::string(": ") + status.name;
 
     status_vec.push_back(status);
   }
@@ -141,6 +155,10 @@ void Updater::update()
 
       iter->run(status);
 
+      // Apply prefix (per-task override or global node name)
+      std::string prefix = getEffectivePrefix(iter->getPrefixOverride());
+      status.name = prefix + std::string(": ") + status.name;
+
       status_vec.push_back(status);
 
       if (status.level) {
@@ -177,11 +195,7 @@ void Updater::publish(diagnostic_msgs::msg::DiagnosticStatus & stat)
 
 void Updater::publish(std::vector<diagnostic_msgs::msg::DiagnosticStatus> & status_vec)
 {
-  for (std::vector<diagnostic_msgs::msg::DiagnosticStatus>::iterator iter = status_vec.begin();
-    iter != status_vec.end(); iter++)
-  {
-    iter->name = node_name_ + std::string(": ") + iter->name;
-  }
+  // Prefix is now applied earlier in update(), broadcast(), and addedTaskCallback()
   diagnostic_msgs::msg::DiagnosticArray msg;
   msg.status = status_vec;
   msg.header.stamp = clock_->now();
@@ -193,6 +207,19 @@ void Updater::addedTaskCallback(DiagnosticTaskInternal & task)
   DiagnosticStatusWrapper stat;
   stat.name = task.getName();
   stat.summary(0, "Node starting up");
+
+  // Apply prefix (per-task override or global node name)
+  std::string prefix = getEffectivePrefix(task.getPrefixOverride());
+  stat.name = prefix + std::string(": ") + stat.name;
+
   publish(stat);
+}
+
+std::string Updater::getEffectivePrefix(const std::string & task_prefix) const
+{
+  if (!task_prefix.empty()) {
+    return task_prefix;
+  }
+  return node_name_;
 }
 }  // namespace diagnostic_updater

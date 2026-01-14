@@ -156,10 +156,11 @@ class DiagnosticTaskVector:
     class DiagnosticTaskInternal:
         """Class used to represent a diagnostic task internally."""
 
-        def __init__(self, name, fn):
+        def __init__(self, name, fn, prefix_override=''):
             """Construct a DiagnosticTaskInternal."""
             self.name = name
             self.fn = fn
+            self.prefix_override = prefix_override
 
         def run(self, stat):
             """Run the task."""
@@ -181,20 +182,22 @@ class DiagnosticTaskVector:
         """
         pass
 
-    def add(self, *args):
+    def add(self, *args, prefix_override=''):
         """
         Add a task to the DiagnosticTaskVector.
 
         Usage:
         add(task): where task is a DiagnosticTask
         add(name, fn): add a DiagnosticTask embodied by a name and function
+        add(task, prefix_override='prefix'): add with custom prefix
+        add(name, fn, prefix_override='prefix'): add with custom prefix
         """
         if len(args) == 1:
             task = DiagnosticTaskVector.DiagnosticTaskInternal(
-                args[0].getName(), args[0].run)
+                args[0].getName(), args[0].run, prefix_override)
         elif len(args) == 2:
             task = DiagnosticTaskVector.DiagnosticTaskInternal(
-                args[0], args[1])
+                args[0], args[1], prefix_override)
 
         with self.lock:
             self.tasks.append(task)
@@ -232,22 +235,34 @@ class Updater(DiagnosticTaskVector):
     interval.
     """
 
-    def __init__(self, node, period=1.0):
+    def __init__(
+        self,
+        node,
+        period=1.0,
+        topic_name='/diagnostics',
+        node_name_override='',
+        param_name_prefix='diagnostic_updater'
+    ):
         """Construct an updater class."""
         DiagnosticTaskVector.__init__(self)
         self.node = node
+        self.topic_name = topic_name
         self.publisher = self.node.create_publisher(
-            DiagnosticArray, '/diagnostics', 1)
-        self.period_parameter = 'diagnostic_updater.period'
-        self.__period = self.node.declare_parameter(
-            self.period_parameter, period).value
+            DiagnosticArray, topic_name, 1)
+        self.period_parameter = param_name_prefix + '.period'
+        if self.node.has_parameter(self.period_parameter):
+            self.__period = self.node.get_parameter(
+                self.period_parameter).value
+        else:
+            self.__period = self.node.declare_parameter(
+                self.period_parameter, period).value
         self.timer = self.node.create_timer(self.__period, self.update)
 
         self.verbose = False
         self.hwid = ''
         self.warn_nohwid_done = False
 
-        self.use_fqn_parameter = 'diagnostic_updater.use_fqn'
+        self.use_fqn_parameter = param_name_prefix + '.use_fqn'
         if self.node.has_parameter(self.use_fqn_parameter):
             self.__use_fqn = self.node.get_parameter(
                 self.use_fqn_parameter).value
@@ -259,6 +274,20 @@ class Updater(DiagnosticTaskVector):
             self.node_name = '/'.join([self.node.get_namespace(), self.node.get_name()])
         else:
             self.node_name = self.node.get_name()
+
+        # If a node_name_override is provided, use it instead of the actual node name
+        if node_name_override:
+            self.node_name = node_name_override
+
+    def _get_effective_prefix(self, task_prefix):
+        """Get the effective prefix for a task."""
+        if task_prefix:
+            return task_prefix
+        return self.node_name
+
+    def setNodeName(self, node_name):
+        """Set the node name used as prefix in diagnostic names."""
+        self.node_name = node_name
 
     def update(self):
         """
@@ -281,6 +310,10 @@ class Updater(DiagnosticTaskVector):
                 status.hardware_id = self.hwid
 
                 status = task.run(status)
+
+                # Apply prefix (per-task override or global node name)
+                prefix = self._get_effective_prefix(task.prefix_override)
+                status.name = prefix + ': ' + status.name
 
                 status_vec.append(status)
 
@@ -334,6 +367,11 @@ class Updater(DiagnosticTaskVector):
             status = DiagnosticStatusWrapper()
             status.name = task.name
             status.summary(lvl, msg)
+
+            # Apply prefix (per-task override or global node name)
+            prefix = self._get_effective_prefix(task.prefix_override)
+            status.name = prefix + ': ' + status.name
+
             status_vec.append(status)
 
         self.publish(status_vec)
@@ -361,11 +399,11 @@ class Updater(DiagnosticTaskVector):
         if not type(msg) is list:
             msg = [msg]
 
+        # Prefix is now applied earlier in update(), broadcast(), and addedTaskCallback()
         now = self.node.get_clock().now()
         da = DiagnosticArray()
         da.header.stamp = now.to_msg()  # Add timestamp for ROS 0.10
         for stat in msg:
-            stat.name = self.node_name + ': ' + stat.name
             db = DiagnosticStatus()
             db.name = stat.name
             db.message = stat.message
@@ -380,4 +418,9 @@ class Updater(DiagnosticTaskVector):
         stat = DiagnosticStatusWrapper()
         stat.name = task.name
         stat.summary(DiagnosticStatus.OK, 'Node starting up')
+
+        # Apply prefix (per-task override or global node name)
+        prefix = self._get_effective_prefix(task.prefix_override)
+        stat.name = prefix + ': ' + stat.name
+
         self.publish(stat)
