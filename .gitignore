@@ -4,3 +4,6 @@
 *.pydevproject
 *~ 
 
+build
+log
+install

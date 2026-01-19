@@ -36,6 +36,7 @@
 #define DIAGNOSTIC_UPDATER__DIAGNOSTIC_UPDATER_HPP_
 
 #include <functional>  // for bind()
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -378,6 +379,37 @@ public:
       period)
   {}
 
+  /**
+   * \brief Constructs an updater class with extended options.
+   *
+   * \param node Node pointer to set up diagnostics
+   * \param period Value in seconds to set the update period
+   * \param topic_name Topic name for publishing diagnostics
+   * \param node_name_override Prefix to replace node name in diagnostic names
+   * \param param_name_prefix Prefix for parameter names
+   * \note The given period value not being used if the `<param_name_prefix>.period`
+   * ros2 parameter was set previously.
+   */
+  template<class NodeT>
+  Updater(
+    NodeT node,
+    double period,
+    const std::string & topic_name,
+    const std::string & node_name_override,
+    const std::string & param_name_prefix)
+  : Updater(
+      node->get_node_base_interface(),
+      node->get_node_clock_interface(),
+      node->get_node_logging_interface(),
+      node->get_node_parameters_interface(),
+      node->get_node_timers_interface(),
+      node->get_node_topics_interface(),
+      period,
+      topic_name,
+      node_name_override,
+      param_name_prefix)
+  {}
+
   Updater(
     std::shared_ptr<rclcpp::node_interfaces::NodeBaseInterface> base_interface,
     std::shared_ptr<rclcpp::node_interfaces::NodeClockInterface> clock_interface,
@@ -386,6 +418,25 @@ public:
     std::shared_ptr<rclcpp::node_interfaces::NodeTimersInterface> timers_interface,
     std::shared_ptr<rclcpp::node_interfaces::NodeTopicsInterface> topics_interface,
     double period = 1.0);
+
+  /**
+   * \brief Constructs an updater class with extended options.
+   *
+   * \param topic_name Topic name for publishing diagnostics
+   * \param node_name_override Prefix to replace node name in diagnostic names
+   * \param param_name_prefix Prefix for parameter names
+   */
+  Updater(
+    std::shared_ptr<rclcpp::node_interfaces::NodeBaseInterface> base_interface,
+    std::shared_ptr<rclcpp::node_interfaces::NodeClockInterface> clock_interface,
+    std::shared_ptr<rclcpp::node_interfaces::NodeLoggingInterface> logging_interface,
+    std::shared_ptr<rclcpp::node_interfaces::NodeParametersInterface> parameters_interface,
+    std::shared_ptr<rclcpp::node_interfaces::NodeTimersInterface> timers_interface,
+    std::shared_ptr<rclcpp::node_interfaces::NodeTopicsInterface> topics_interface,
+    double period,
+    const std::string & topic_name,
+    const std::string & node_name_override,
+    const std::string & param_name_prefix);
 
   /**
    * \brief Returns the interval between updates.
@@ -407,6 +458,67 @@ public:
   void setPeriod(double period)
   {
     setPeriod(rclcpp::Duration::from_seconds(period));
+  }
+
+  void setNodeName(std::string node_name)
+  {
+    node_name_ = node_name;
+  }
+
+  // Bring base class add methods into scope for backward compatibility
+  using DiagnosticTaskVector::add;
+
+  /**
+   * \brief Add a DiagnosticTask embodied by a name and function to the
+   * Updater with a prefix override
+   *
+   * \param name Name to autofill in the DiagnosticStatusWrapper for this task.
+   *
+   * \param f Function to call to fill out the DiagnosticStatusWrapper.
+   *
+   * \param prefix_override Prefix to use instead of node name for this task.
+   */
+  void add(const std::string & name, TaskFunction f, const std::string & prefix_override)
+  {
+    DiagnosticTaskInternal int_task(name, f);
+    prefix_overrides_[name] = prefix_override;
+    addInternal(int_task);
+  }
+
+  /**
+   * \brief Add a DiagnosticTask to the Updater with a prefix override
+   *
+   * \param task The DiagnosticTask to be added.
+   *
+   * \param prefix_override Prefix to use instead of node name for this task.
+   */
+  void add(DiagnosticTask & task, const std::string & prefix_override)
+  {
+    TaskFunction f = std::bind(&DiagnosticTask::run, &task, std::placeholders::_1);
+    add(task.getName(), f, prefix_override);
+  }
+
+  /**
+   * \brief Add a DiagnosticTask embodied by a name and method to the
+   * Updater with a prefix override
+   *
+   * \param name Name to autofill in the DiagnosticStatusWrapper for this task.
+   *
+   * \param c Class instance the method is being called on.
+   *
+   * \param f Method to call to fill out the DiagnosticStatusWrapper.
+   *
+   * \param prefix_override Prefix to use instead of node name for this task.
+   */
+  template<class T>
+  void add(
+    const std::string name, T * c,
+    void (T::* f)(diagnostic_updater::DiagnosticStatusWrapper &),
+    const std::string & prefix_override)
+  {
+    DiagnosticTaskInternal int_task(name, std::bind(f, c, std::placeholders::_1));
+    prefix_overrides_[name] = prefix_override;
+    addInternal(int_task);
   }
 
   /**
@@ -480,7 +592,11 @@ private:
 
   std::string hwid_;
   std::string node_name_;
+  std::string topic_name_;
   bool warn_nohwid_done_;
+  std::map<std::string, std::string> prefix_overrides_;
+
+  std::string getEffectivePrefix(const std::string & task_name) const;
 };
 }   // namespace diagnostic_updater
 
